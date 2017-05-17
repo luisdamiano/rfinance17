@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="generator" content="pandoc">
+  <meta name="author" content="Luis Damiano" />
+  <title>A quick  (equation free)  intro to Hidden Markov Models applied to Stock Volatility</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+  <link rel="stylesheet" href="lib/reveal.js-3.3.0.1/css/reveal.css"/>
+
+
+
+<link rel="stylesheet" href="lib/reveal.js-3.3.0.1/css/theme/sky.css" id="theme">
+
+
+  <!-- some tweaks to reveal css -->
+  <style type="text/css">
+    .reveal h1 { font-size: 2.0em; }
+    .reveal h2 { font-size: 1.5em;  }
+    .reveal h3 { font-size: 1.25em;	}
+    .reveal h4 { font-size: 1em;	}
+
+    .reveal .slides>section,
+    .reveal .slides>section>section {
+      padding: 0px 0px;
+    }
+
+
+
+    .reveal table {
+      border-width: 1px;
+      border-spacing: 2px;
+      border-style: dotted;
+      border-color: gray;
+      border-collapse: collapse;
+      font-size: 0.7em;
+    }
+
+    .reveal table th {
+      border-width: 1px;
+      padding-left: 10px;
+      padding-right: 25px;
+      font-weight: bold;
+      border-style: dotted;
+      border-color: gray;
+    }
+
+    .reveal table td {
+      border-width: 1px;
+      padding-left: 10px;
+      padding-right: 25px;
+      border-style: dotted;
+      border-color: gray;
+    }
+
+
+  </style>
+
+    <style type="text/css">code{white-space: pre;}</style>
+
+    <link rel="stylesheet" href="custom.css"/>
+
+<!-- Printing and PDF exports -->
+<script id="paper-css" type="application/dynamic-css">
+
+/* Default Print Stylesheet Template
+   by Rob Glazebrook of CSSnewbie.com
+   Last Updated: June 4, 2008
+
+   Feel free (nay, compelled) to edit, append, and
+   manipulate this file as you see fit. */
+
+
+@media print {
+
+	/* SECTION 1: Set default width, margin, float, and
+	   background. This prevents elements from extending
+	   beyond the edge of the printed page, and prevents
+	   unnecessary background images from printing */
+	html {
+		background: #fff;
+		width: auto;
+		height: auto;
+		overflow: visible;
+	}
+	body {
+		background: #fff;
+		font-size: 20pt;
+		width: auto;
+		height: auto;
+		border: 0;
+		margin: 0 5%;
+		padding: 0;
+		overflow: visible;
+		float: none !important;
+	}
+
+	/* SECTION 2: Remove any elements not needed in print.
+	   This would include navigation, ads, sidebars, etc. */
+	.nestedarrow,
+	.controls,
+	.fork-reveal,
+	.share-reveal,
+	.state-background,
+	.reveal .progress,
+	.reveal .backgrounds {
+		display: none !important;
+	}
+
+	/* SECTION 3: Set body font face, size, and color.
+	   Consider using a serif font for readability. */
+	body, p, td, li, div {
+		font-size: 20pt!important;
+		font-family: Georgia, "Times New Roman", Times, serif !important;
+		color: #000;
+	}
+
+	/* SECTION 4: Set heading font face, sizes, and color.
+	   Differentiate your headings from your body text.
+	   Perhaps use a large sans-serif for distinction. */
+	h1,h2,h3,h4,h5,h6 {
+		color: #000!important;
+		height: auto;
+		line-height: normal;
+		font-family: Georgia, "Times New Roman", Times, serif !important;
+		text-shadow: 0 0 0 #000 !important;
+		text-align: left;
+		letter-spacing: normal;
+	}
+	/* Need to reduce the size of the fonts for printing */
+	h1 { font-size: 28pt !important;  }
+	h2 { font-size: 24pt !important; }
+	h3 { font-size: 22pt !important; }
+	h4 { font-size: 22pt !important; font-variant: small-caps; }
+	h5 { font-size: 21pt !important; }
+	h6 { font-size: 20pt !important; font-style: italic; }
+
+	/* SECTION 5: Make hyperlinks more usable.
+	   Ensure links are underlined, and consider appending
+	   the URL to the end of the link for usability. */
+	a:link,
+	a:visited {
+		color: #000 !important;
+		font-weight: bold;
+		text-decoration: underline;
+	}
+	/*
+	.reveal a:link:after,
+	.reveal a:visited:after {
+		content: " (" attr(href) ") ";
+		color: #222 !important;
+		font-size: 90%;
+	}
+	*/
+
+
+	/* SECTION 6: more reveal.js specific additions by @skypanther */
+	ul, ol, div, p {
+		visibility: visible;
+		position: static;
+		width: auto;
+		height: auto;
+		display: block;
+		overflow: visible;
+		margin: 0;
+		text-align: left !important;
+	}
+	.reveal pre,
+	.reveal table {
+		margin-left: 0;
+		margin-right: 0;
+	}
+	.reveal pre code {
+		padding: 20px;
+		border: 1px solid #ddd;
+	}
+	.reveal blockquote {
+		margin: 20px 0;
+	}
+	.reveal .slides {
+		position: static !important;
+		width: auto !important;
+		height: auto !important;
+
+		left: 0 !important;
+		top: 0 !important;
+		margin-left: 0 !important;
+		margin-top: 0 !important;
+		padding: 0 !important;
+		zoom: 1 !important;
+
+		overflow: visible !important;
+		display: block !important;
+
+		text-align: left !important;
+		-webkit-perspective: none;
+		   -moz-perspective: none;
+		    -ms-perspective: none;
+		        perspective: none;
+
+		-webkit-perspective-origin: 50% 50%;
+		   -moz-perspective-origin: 50% 50%;
+		    -ms-perspective-origin: 50% 50%;
+		        perspective-origin: 50% 50%;
+	}
+	.reveal .slides section {
+		visibility: visible !important;
+		position: static !important;
+		width: auto !important;
+		height: auto !important;
+		display: block !important;
+		overflow: visible !important;
+
+		left: 0 !important;
+		top: 0 !important;
+		margin-left: 0 !important;
+		margin-top: 0 !important;
+		padding: 60px 20px !important;
+		z-index: auto !important;
+
+		opacity: 1 !important;
+
+		page-break-after: always !important;
+
+		-webkit-transform-style: flat !important;
+		   -moz-transform-style: flat !important;
+		    -ms-transform-style: flat !important;
+		        transform-style: flat !important;
+
+		-webkit-transform: none !important;
+		   -moz-transform: none !important;
+		    -ms-transform: none !important;
+		        transform: none !important;
+
+		-webkit-transition: none !important;
+		   -moz-transition: none !important;
+		    -ms-transition: none !important;
+		        transition: none !important;
+	}
+	.reveal .slides section.stack {
+		padding: 0 !important;
+	}
+	.reveal section:last-of-type {
+		page-break-after: avoid !important;
+	}
+	.reveal section .fragment {
+		opacity: 1 !important;
+		visibility: visible !important;
+
+		-webkit-transform: none !important;
+		   -moz-transform: none !important;
+		    -ms-transform: none !important;
+		        transform: none !important;
+	}
+	.reveal section img {
+		display: block;
+		margin: 15px 0px;
+		background: rgba(255,255,255,1);
+		border: 1px solid #666;
+		box-shadow: none;
+	}
+
+	.reveal section small {
+		font-size: 0.8em;
+	}
+
+}  
+</script>
+
+
+<script id="pdf-css" type="application/dynamic-css">
+    
+/**
+ * This stylesheet is used to print reveal.js
+ * presentations to PDF.
+ *
+ * https://github.com/hakimel/reveal.js#pdf-export
+ */
+
+* {
+	-webkit-print-color-adjust: exact;
+}
+
+body {
+	margin: 0 auto !important;
+	border: 0;
+	padding: 0;
+	float: none !important;
+	overflow: visible;
+}
+
+html {
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+
+/* Remove any elements not needed in print. */
+.nestedarrow,
+.reveal .controls,
+.reveal .progress,
+.reveal .playback,
+.reveal.overview,
+.fork-reveal,
+.share-reveal,
+.state-background {
+	display: none !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+	text-shadow: 0 0 0 #000 !important;
+}
+
+.reveal pre code {
+	overflow: hidden !important;
+	font-family: Courier, 'Courier New', monospace !important;
+}
+
+ul, ol, div, p {
+	visibility: visible;
+	position: static;
+	width: auto;
+	height: auto;
+	display: block;
+	overflow: visible;
+	margin: auto;
+}
+.reveal {
+	width: auto !important;
+	height: auto !important;
+	overflow: hidden !important;
+}
+.reveal .slides {
+	position: static;
+	width: 100%;
+	height: auto;
+
+	left: auto;
+	top: auto;
+	margin: 0 !important;
+	padding: 0 !important;
+
+	overflow: visible;
+	display: block;
+
+	-webkit-perspective: none;
+	   -moz-perspective: none;
+	    -ms-perspective: none;
+	        perspective: none;
+
+	-webkit-perspective-origin: 50% 50%; /* there isn't a none/auto value but 50-50 is the default */
+	   -moz-perspective-origin: 50% 50%;
+	    -ms-perspective-origin: 50% 50%;
+	        perspective-origin: 50% 50%;
+}
+
+.reveal .slides section {
+	page-break-after: always !important;
+
+	visibility: visible !important;
+	position: relative !important;
+	display: block !important;
+	position: relative !important;
+
+	margin: 0 !important;
+	padding: 0 !important;
+	box-sizing: border-box !important;
+	min-height: 1px;
+
+	opacity: 1 !important;
+
+	-webkit-transform-style: flat !important;
+	   -moz-transform-style: flat !important;
+	    -ms-transform-style: flat !important;
+	        transform-style: flat !important;
+
+	-webkit-transform: none !important;
+	   -moz-transform: none !important;
+	    -ms-transform: none !important;
+	        transform: none !important;
+}
+
+.reveal section.stack {
+	margin: 0 !important;
+	padding: 0 !important;
+	page-break-after: avoid !important;
+	height: auto !important;
+	min-height: auto !important;
+}
+
+.reveal img {
+	box-shadow: none;
+}
+
+.reveal .roll {
+	overflow: visible;
+	line-height: 1em;
+}
+
+/* Slide backgrounds are placed inside of their slide when exporting to PDF */
+.reveal section .slide-background {
+	display: block !important;
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	z-index: -1;
+}
+
+/* All elements should be above the slide-background */
+.reveal section>* {
+	position: relative;
+	z-index: 1;
+}
+
+/* Display slide speaker notes when 'showNotes' is enabled */
+.reveal .speaker-notes-pdf {
+	display: block;
+	width: 100%;
+	max-height: none;
+	left: auto;
+	top: auto;
+	z-index: 100;
+}
+
+/* Display slide numbers when 'slideNumber' is enabled */
+.reveal .slide-number-pdf {
+	display: block;
+	position: absolute;
+	font-size: 14px;
+}
+
+</script>
+
+
+<script>
+var style = document.createElement( 'style' );
+style.type = 'text/css';
+var style_script_id = window.location.search.match( /print-pdf/gi ) ? 'pdf-css' : 'paper-css';
+var style_script = document.getElementById(style_script_id).text;
+style.innerHTML = style_script;
+document.getElementsByTagName('head')[0].appendChild(style);
+</script>
+
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+
+<section>
+    <h1 class="title">A quick <br/ >(<em>equation free</em>)<br /> intro to Hidden Markov Models applied to Stock Volatility</h1>
+    <h2 class="author">Luis Damiano</h2>
+    <h3 class="date">R/Finance 2017 | May 19</h3>
+</section>
+
+<section class="slide level2">
+
+<!--
+A few basic questions that should serve as a guide while making the slides:
+
+* What does "hidden" mean
+* What does markov mean in the context of an hmm
+* Where are some obvious fits for this in trading and finance
+* A financial time series example
+
+# Agenda
+
+## Agenda
+
+- Motivation (30')
+- Hidden Markov Models (60')
+- Application to stock vol (180')
+- Takeaway (30')
+-->
+</section>
+<section><section id="motivation" class="titleslide slide level1"><h1>Motivation</h1></section><section id="ever-heard-this-question" class="slide level2">
+<h1>Ever heard this question?</h1>
+<p><span class="bigtext">How’s the <span class="largetext mygreen">market</span> today?</span></p>
+</section><section id="possible-answers" class="slide level2">
+<h1>Possible answers</h1>
+<aside class="notes">
+<ul>
+<li>Don’t rush thru this slide - try to catch their attention</li>
+<li>The answer depends on what you’re modelling, but they all have something in common…</li>
+</ul>
+</aside>
+<ul>
+<li><strong>Trader</strong>: bullish/bearish</li>
+<li><strong>Risk analyst</strong>: low/high volatility</li>
+<li><strong>Behavioural finance</strong>: risk on/off</li>
+<li><strong>Macro economist</strong>: expansion/recession</li>
+</ul>
+</section><section id="hows-the-market-today" class="slide level2">
+<h1>How’s the market today?</h1>
+<aside class="notes">
+<ul>
+<li>An assumption everyone in this room will easily buy</li>
+<li>Market is too complex to be handled by a simple model that holds in every single context</li>
+<li>Otherwise, we’d be dead bored at work</li>
+<li>ex. Different models for low/high vol or bull/bear markets</li>
+</ul>
+</aside>
+<p>This <em>fair</em> question has an <em>implicit</em> assumption:</p>
+<p><br /></p>
+<p>Markets <br /> <span class="bigtext myred">DON’T</span><br /> behave<br /> <span class="largetext"><em>exactly</em></span><br /> the same way<br /> every single day.</p>
+</section><section id="markets-have-states-instead" class="slide level2">
+<h1>Markets have states instead</h1>
+<p>But they’re<br /> <span class="bigtext"><strong>HIDDEN</strong></span><br /></p>
+<ul>
+<li class="fragment">can’t be observed directly</li>
+<li class="fragment">need inference based on observed data (prices, volume, order size)</li>
+</ul>
+</section></section>
+<section><section id="hidden-markov-models" class="titleslide slide level1" data-background="./img/hmm.svg" data-background-size="600px" data-background-repeat="no-repeat"><h1>Hidden Markov Models</h1></section><section id="specification" class="slide level2">
+<h1>Specification</h1>
+<aside class="notes">
+<ul>
+<li>don’t explain the keywords!</li>
+<li>re Box: remember models are simplifications of reality.</li>
+<li>btw, Box was an awesome statistician</li>
+</ul>
+</aside>
+<p>HMM involves two interconnected models</p>
+<ul>
+<li class="fragment"><strong>State model</strong>: discrete-time, discrete-state Markov chain with hidden states.</li>
+<li class="fragment"><strong>Observation model</strong>: a model for the observations, emissions or output.</li>
+<li class="fragment"><strong>Keywords</strong>: bayesian inference, probabilistic machine learning, state space models.</li>
+</ul>
+<blockquote>
+<p>All models are wrong, but some are useful. (George E. P. Box)</p>
+</blockquote>
+</section><section id="hmm-and-mixtures" class="slide level2">
+<h1>HMM and Mixtures</h1>
+<aside class="notes">
+<ul>
+<li>Components have memory</li>
+</ul>
+</aside>
+<blockquote>
+<p>HMM may be interpreted as an extension of a mixture model</p>
+</blockquote>
+<ul>
+<li class="fragment">Each single time slice corresponds to a mixture, but…</li>
+<li class="fragment">The component for each observation has memory.</li>
+</ul>
+</section></section>
+<section><section id="hmm-applied-to-stock-vol" class="titleslide slide level1"><h1>HMM applied to stock vol!</h1></section><section id="setup" class="slide level2">
+<h1>Setup</h1>
+<ul>
+<li class="fragment"><strong>Goal</strong>: modeling deterministic volatility for stocks</li>
+<li class="fragment"><strong>Data</strong>: Daily close prices 2011-2016 from ^GSPC, F, GM, THO, AIR.</li>
+<li class="fragment"><strong>State model</strong>: binary latent state with first-order markovian memory</li>
+<li class="fragment"><strong>Observation model</strong>: <span class="math inline">\(GARCH(1, 1)\)</span></li>
+</ul>
+</section><section id="one-stock-f-with-two-latent-states" class="slide level2">
+<h1>One stock (F) with two latent states</h1>
+<aside class="notes">
+<ul>
+<li>Explain the vertical axis in plot 2.</li>
+</ul>
+</aside>
+<p><img src="presentation_files/figure-revealjs/unnamed-chunk-2-1.png" width="1728" /></p>
+<p><span class="smalltext"><strong>Common sense check</strong>: Observing small returns makes us more confindent about using the low volatility model.</span></p>
+<!-- ## Other characteristics (see the appendix) -->
+<!-- - State probabilities are autocorrelated, hinting that some kind of memory structure may help in prediction (not shown). -->
+<!-- - The variance of the returns in each state are linearly related (not shown). -->
+<!-- - You should test if these features are reasonable for your own use case! -->
+</section><section id="a-stock-portfolio-with-two-latent-states" class="slide level2">
+<h1>A stock portfolio with two latent states</h1>
+<p><img src="presentation_files/figure-revealjs/unnamed-chunk-3-1.png" width="1728" /></p>
+<p><span class="smalltext">Correlation in belief states is higher for stocks in the same industry (compare F/GM vs F/AIR).</span></p>
+</section><section id="takeaway" class="slide level2">
+<h1>Takeaway</h1>
+<aside class="notes">
+<ul>
+<li>Explain the vertical axis in plot 2.</li>
+<li>Say, the prob that similar stocks are in the high volatility state are correlated.</li>
+</ul>
+</aside>
+<ul>
+<li class="fragment">States are hidden, yet meaningful. They are subject to useful domain knowledge interpretation.</li>
+<li class="fragment">Belief states across assets are cross-correlated.</li>
+<li class="fragment">This relationship is stronger for stocks in the same industry, with similar business models or similar exposure to macroeconomic factors.</li>
+</ul>
+</section><section id="further-research" class="slide level2">
+<h1>Further research</h1>
+<blockquote>
+<p>What if hidden states were <strong>hierarchical</strong>?</p>
+</blockquote>
+<p><span class="smalltext">Risk state of a global portfolio may be mapped into components</span> <br /><span class="math inline">\(\text{Country} + \text{Industry} + \text{Individual}\)</span></p>
+<p>I’m currently exploring <br /><strong>Hierarchical Hidden Markov Models applied to finance</strong><br /> for my Google Summer of Code 2017 project.</p>
+</section><section id="thanks" class="slide level2 gitlogo">
+<h1>Thanks!</h1>
+<h2>
+May any of these ideas be of value for your trading strategy or risk model?
+</h2>
+<p><span class="smalltext">Check the extended material for this talk <br />(R Notebook, fully working code, references and neat plots)</span></p>
+<p><a href="https://github.com/luisdamiano/rfinance17" class="uri">https://github.com/luisdamiano/rfinance17</a></p>
+<p><img src="img/1493974219_github.svg" alt="2" /></p>
+</section></section>
+    </div>
+  </div>
+
+  <script src="lib/reveal.js-3.3.0.1/lib/js/head.min.js"></script>
+  <script src="lib/reveal.js-3.3.0.1/js/reveal.js"></script>
+
+  <script>
+
+      // Full list of configuration options available at:
+      // https://github.com/hakimel/reveal.js#configuration
+      Reveal.initialize({
+        // Display controls in the bottom right corner
+        controls: true,
+        // Display a presentation progress bar
+        progress: true,
+        // Display the page number of the current slide
+        slideNumber: true,
+        // Push each slide change to the browser history
+        history: true,
+        // Enable keyboard shortcuts for navigation
+        keyboard: true,
+        // Vertical centering of slides
+        center: false,
+        // Hides the address bar on mobile devices
+        hideAddressBar: true,
+        // Opens links in an iframe preview overlay
+        previewLinks: true,
+        // Transition style
+        transition: 'zoom', // none/fade/slide/convex/concave/zoom
+        // Transition style for full page slide backgrounds
+        backgroundTransition: 'default', // none/fade/slide/convex/concave/zoom
+
+
+
+        // Optional reveal.js plugins
+        dependencies: [
+          { src: 'lib/reveal.js-3.3.0.1/plugin/notes/notes.js', async: true },
+        ]
+      });
+    </script>
+  <!-- dynamically load mathjax for compatibility with self-contained -->
+  <script>
+    (function () {
+      var script = document.createElement("script");
+      script.type = "text/javascript";
+      script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+      document.getElementsByTagName("head")[0].appendChild(script);
+    })();
+  </script>
+
+<script>
+  (function() {
+    if (window.jQuery) {
+      Reveal.addEventListener( 'slidechanged', function(event) {  
+        window.jQuery(event.previousSlide).trigger('hidden');
+        window.jQuery(event.currentSlide).trigger('shown');
+      });
+    }
+  })();
+</script>
+
+
+  </body>
+</html>

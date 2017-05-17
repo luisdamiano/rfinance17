@@ -1,0 +1,34 @@
+.mygreen {
+  color: #2EA147 !important; /* green */
+}
+
+.myred {
+  color: red !important; /* green */
+}
+
+.smalltext {
+  font-size:  75% !important;
+  text-align: left !important;
+}
+
+.largetext {
+  font-size:  150% !important;
+  text-align: left !important;
+}
+
+.bigtext {
+  line-height:100% !important;
+  font-size:  400% !important;
+  text-align: left !important;
+}
+
+.thankyou-slide {
+  background: #4387fd !important;
+  color: white;
+}
+
+.gitlogo img {
+  width: 100px !important;
+  height: 100px !important;
+  border: 0px !important;
+}

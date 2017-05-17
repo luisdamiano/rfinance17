@@ -1,0 +1,300 @@
+---
+title: "A quick intro to Hidden Markov Models applied to Stock Volatility"
+author: "Luis Damiano"
+date: "R/Finance 2017 | May 19"
+output: html_notebook # html_document
+bibliography: bibliography.bib
+---
+
+This notebook is part of the material presented in [R/Finance](http://www.rinfinance.com/) 2017. Please, see the [README](../README.md) file.
+
+\[
+\newcommand{\mat}[1]{\mathbf{#1}}
+\newcommand{\EE}[1]{\mathbb{E}\left[ #1 \right]}
+\newcommand{\VV}[1]{\mathbb{V}\left[ #1 \right]}
+\newcommand{\RR}{\mathbb{r}}
+\newcommand{\II}{\mathbb{I}}
+\newcommand{\NN}{\mathbb{N}}
+\newcommand{\bp}{\mathbf{p}}
+\newcommand{\bT}{\mathbf{T}}
+\newcommand{\btheta}{\mathbf{\theta}}
+\]
+
+# What's all this about?
+The aim of this notebook is twofold. First, I'd like to draw your attention to a small fact observed in financial assets prices when filtered through a Markov Switching GARCH model: when log returns are filtered through a GARCH model with Markovian dynamics, the belief states (low/high volatility) are correlated across assets. It's not a game changer but hopefully it will trigger some new ideas to improve your trading strategy or risk model. Second, I'll use this small fact as an excuse to introduce you to a few small concepts that certainly will be of help to any financial analyst.
+
+You'll be exposed to the following concepts:
+
+1. Mixture Normal and Markov Switching GARCH model.
+2. Hidden Markov Model and the forward algorithm.
+3. Bayesian statistics and Stan, a probabilistic programming language for statistical inference.
+4. Neat plots.
+
+Worried by the broad scope? I'll only explain the basics and leave many, many references. Hopefully, this will be enough exposure for you to decide if the topic is worth investing more effort.
+
+#Mixture of Normals Conditional Heteroskedasticity
+
+### Conditional Heteroskedasticity
+Also known as volatility clustering, conditional heteroskedasticity is a key feature of economic time series, in particular of returns of financial assets.  Relatively volatile periods, characterized by large price changes and large returns, alternate with more calm periods with stable prices and small returns [@franses2014time, pp. 26].
+
+Let $P_t$ be the price of an asset at time $t$ and $r_t = log(P_t) - log(P_{t-1})$ be the log return. The expected return $m_t$ is estimated by any model for the mean that leaves an unexplained component $\epsilon_t$ called stochastic error or random shock:
+
+$$ r_t = m_t + \epsilon_t. $$
+As will be seen later, the shock is related to the variance of the returns and may be modelled deterministically or stochastically. In the first case, the error is assumed to have the form $\epsilon_t = v_t \sqrt{h_t}$, where $v_t$ is a standardized random variable, i.e. independent and identically distributed with zero mean and unit variance. Note we've not assumed a Gaussian shape. @franses2014time pp. 170 shows that the shocks have a constant unconditional variance equal to $\sigma^2$ and a distribution conditional on past information $\II_{t-1}$ with mean zero and variance $h_t$. That is,
+
+$$ \EE{\epsilon_t} = 0, \quad \VV{\epsilon_t} = \sigma^2, \quad \EE{\epsilon_t | \II_{t-1}} = 0, \quad \VV{\epsilon_t | \II_{t-1}} = h_t. $$
+Building upon Autoregressive Conditional Heteroskedasticity (ARCH), @bollerslev1986generalized proposed the Generalized Autoregressive Conditional Heteroskedasticity (GARCH). The conditional variance is a deterministic function of its past values and past squared shocks:
+
+$$ (1) \quad \quad h_t = \alpha_0 + \sum_{i=1}^{q}{\alpha_i \ \epsilon^2_{t-1}} + \sum_{j=1}^{p}{\beta_i \ h_{t-j}},$$ 
+with $\alpha_0 > 0$, $\alpha_i \ge 0$, $\beta_j \ge 0$ and $\sum_{i=1}^{max(m, s)}{(\alpha_i + \beta_j)} < 1$ ($\alpha_i = 0 \ \forall \ i > m$ and $\beta_j = 0 \ \forall \ j > s$).
+
+What does all this mean? Simply, that the volatility of returns - measured as the conditional second moment of the series - varies deterministically with time. Changes in conditional volatility are led by past volatility and shocks. The larger the last $q$ shocks or the observed volatility in the last $p$ periods, the more uncertain we are about the next return. It's more uncertain to place a bet on today's close price if the stock just moved far from its expected value. A fairly simple model indeed, but it makes sense.
+
+By the way, the GARCH family is _HUGE_. There's a vast literature originated in the academy during the 90's and fueled by its extensive use in the industry in the 00's. Many variations allow for more complex patterns like non-linearity, asymmetry and fatter tails: Integrated GARCH, GARCH in mean, Exponential GARCH, Threshold GARCH, GJR GARCH, Asymmetric Power GARCH, student t and Generalized Error Distribution, among many others. See @franses2014time pp. 176 and @rugarch2015, Vignettes.
+
+###Mixture of Normals
+A random variable $\epsilon$ is said to have a univariate finite normal mixture distribution if the unconditional density is given by 
+
+$$ MN(\epsilon) = \sum_{j=1}^{K}{\lambda_j \ N(\epsilon | \mu_j, \ \sigma^2_j)}, $$
+where $K \in \NN$ is the number of components, $N(\mu, \ \sigma^2)$ is the Gaussian density with mean $\mu$ and variance $\sigma^2$, and $\lambda_j$ are the mixing weights with $\lambda_j > 0 \ \forall \ j$ and $\sum_{j=1}^{k}{\lambda_j} = 1$ [@haas2004mixed].
+
+A mixture of distribution is an old statistical trick to accomodate skewness and excess kurtosis. It has an extra feature in economics: the components are usually subject to simple yet useful interpretations. The variable of interest has a different mean and variance depending on which state the process is. In our model, states may represent recession/expansion, bearish/bullish, low/high volatility, risk off/on, and so on. Of course, the choice isn't necessarily binary. Keep reading to know more!
+
+###Mixture of Normals + Conditional Heteroskedasticity
+If the time series $\{\epsilon_t\}$ is generated by a $K$-componentMixture of Normals $GARCH(p, q)$ process, then the conditional density of the shock is given by
+$$ f(\epsilon_t | \II_{t-1}) = MN(\lambda_1, \dots, \lambda_K, h_{1t}, h_{Kt}),$$
+where $\II_{t-1}$ is the information set at time $t-1$, $\lambda_i \in (0, 1) \ i = 1, \dots, K$ and $\sum_{i=1}^{K}{\lambda_i} = 1$. In the simplest case (diagonal symmetric), each possible $k = 1, \dots, K$ state has its own conditional volatility governed by its own GARCH deterministic dynamics and its own state-dependent parameters:
+
+$$ (2) \quad \quad h_{kt} = \alpha_{k0} + \sum_{i=1}^{q}{\alpha_{ki} \ \epsilon^2_{t-1}} + \sum_{j=1}^{p}{\beta_{kj} \ h_{k, \ t-j}}. $$ 
+
+This is interesting now. We only observe one series of log returns which follows only one path of conditional volatility. Nonetheless, volatility at any given time $t$ comes from one of the $K$ different states or regimes, each one with its own level and dynamics. Regime switching allows for non-linearity in the model and allow our estimates to quickly adjust to changes in the market.
+
+### Hidden Markov Model + Conditional Heteroskedasticity
+
+Hidden Markov Model (HMM) involves two interconnected models. The state model consists of a discrete-time, discrete-state Markov chain with hidden states $z_t \in \{1, \dots, K\}$ that transition according to $p(z_t | z_{t-1})$. Additionally, the observation model is governed by $p(\mat{y}_t | z_t)$, where $\mat{y}_t$ are the observations, emissions or output. In our case, the latter is represented by the GARCH equation.
+
+It is a specific instance of the state space model family in which the latent variables are discrete. Each single time slice corresponds to a mixture distribution with component densities given by $p(\mat{y}_t | z_t)$, thus HMM may be interpreted as an extension of a mixture model in which the choice of component for each observation is not selected independently but depends on the choice of component for the previous observation. In the case of a simple mixture model for an identically independently distributed sample, the parameters of the transition matrix inside the $i$-th column are the same, so that the conditional distribution $p(z_t | z_{t-1})$ is independent of $z_{t-1}$.
+
+In other words, HMM are equivalent to a Gaussian mixture model with cluster membership ruled by Markovian dynamics, also known as Markov Switching Models (MSM). Multiple sequential observations tend to share the same location until they suddenly jump into a new cluster.
+
+# Bayesian estimation with Stan
+
+### Specification
+The Hidden Markov Model + Conditional Heteroskedasticity proposed above involves only $K$ weights $\lambda_1, \dots, \lambda_K$ that are constant over time. We further assume that the discrete $K$ regimes follow a first-order Markov process led by transition probabilities $\bp$. Since we don't observe the states directly, we say they are hidden and we then estimate a probability distribution over the possible outputs. Remember that there is one set of parameters for the GARCH equation in each state.
+
+Let $z_{t}$ be the discrete component, state or regime at time point $t$. The state dynamics are governed by the transition matrix $\mat{\Psi}$ of size $K \times K$ and elements $\Psi(i, j) = p(z_{t} = j \ | \ z_{t-1} = i)$ with $0 \le \Psi(i, j) \le 1$ and $\sum_{j}{\Psi(i, j)} = 1$. The matrix has $K(K-1)$ independent parameters. The initial latent node $z_{1}$ doesn't have a parent node and has a marginal distribution $p(z_1)$.
+
+The specification of the probabilistic model is completed by the conditional distributions of the observed variables $p(\epsilon | z_t, \btheta)$ where $\btheta$ are a set of parameters for this distribution. Usually known as the emission probabilities in the machine learning jargon, each element of this $K$-sized vector represents the probabilities that any given observation of the volatility corresponds to the $K$ possible states.
+
+### Forward algorithm
+
+The forward algorithm is used to estimate the belief state $p(z_{t} | \ \II_{t})$, the joint probability of a state at a certain time and the information available up the moment. Estimating the $K$-sized vector is known as filtering. When run altogether with the backward algorithm, you get the smoothed probability $p(z_{t} \ | \ \II_{T})$.
+
+A filter infers the belief state based on all the available information up to that point $p(z_t | \mat{y}_{1:t})$. It achieves better noise reduction than simply estimating the hidden state based on the current estimate. The filtering process can be run online, or recursively, as new data streams in.
+
+Filtered maginals can be computed recursively by means of the forward algorithm @baum1967inequality. Let $\psi_t(j) = p(\mat{y}_t | z_t = j)$ be the local evidence at time $t$ and $\Psi(i, j) = p(z_t = j | z_{t-1} = i)$ be the transition probability. First, the one-step-ahead predictive density is computed
+
+\[
+p(z_t = j | \mat{y}_{1:t-1}) = \sum_{i}{\Psi(i, j) p(z_{t-1} = i | \mat{y}_{1:t-1})}.
+\]
+
+Acting as prior information, this quantity is updated with observed data at the point $t$ using Bayes rule,
+\begin{align*}
+\label{eq:filtered-belief_state}
+\alpha_t(j) 
+  & \triangleq  p(z_t = j | \mat{y}_{1:t}) \\
+  &= p(z_t = j | \mat{y}_{t}, \mat{y}_{1:t-1}) \\
+  &= Z_t^{-1} \psi_t(j) p(z_t = j | \mat{y}_{1:t-1}) \\
+  &= Z_t^{-1} \psi_t(j) \alpha_{t-1}(j),
+\end{align*}
+
+where the normalization constant is given by
+
+\[
+Z_t
+  \triangleq  p(\mat{y}_t | \mat{y}_{1:t-1})
+  = \sum_{l}{p(\mat{y}_{t} | z_t = l) p(z_t = l | \mat{y}_{1:t-1})},
+  = \sum_{l}{p(\mat{y}_{t} | z_t = l) \alpha_{t-1}(l)}.
+\]
+
+This predict-update cycle results in the filtered belief states at point $t$. As this algorithm only requires the evaluation of the quantities $\psi_t(j)$ for each value of $z_t$ for every $t$ and fixed $\mat{y}_t$, the posterior distribution of the latent states is independent of the form of the observation density or indeed of whether the observed variables are continuous or discrete @jordan2003introduction.
+
+Let $\mat{\alpha}_t$ be a $K$-sized vector with the filtered belief states at point $t$, $\mat{\psi}_t(j)$ be the $K$-sized vector of local evidence at point $t$, $\mat{\Psi}$ be the transition matrix and $\mat{u} \odot \mat{v}$ is the Hadamard product, representing elementwise vector multiplication. Then, the bayesian updating procedure can be expressed in matrix notitation as
+
+\[
+\mat{\alpha}_t \propto \mat{\psi}_t \odot (\mat{\Psi}^T \mat{\alpha}_{t-1}).
+\]
+
+In addition to computing the hidden states, the algorithm yields the log probability of the evidence
+
+\[
+\log p(\mat{y}_{1:T} | \mat{\theta}) = \sum_{t=1}^{T}{p(\mat{y}_{1:t} | \mat{y}_{1:t-1})} = \sum_{t=1}^{T}{\log Z_t}.
+\]
+
+Log domain should be preferred to avoid numerical underflow.
+
+\begin{algorithm}[H]
+  \DontPrintSemicolon
+  \SetKwInOut{Input}{input}
+  \SetKwInOut{Output}{output}
+  \SetKwProg{Fn}{def}{\string:}{}
+  
+  \Input{Transition matrix $\mat{\Psi}$, local evidence vector $\mat{\psi}_t$ and initial state distribution $\mat{\pi}$.}
+  \Output{Belief state vector $\mat{\alpha}_{1:T}$ and log probability of the evidence $\log p(\mat{y}_{1:T} = \sum_{t} \log Z_t$).}
+  \BlankLine
+
+  \SetKwFunction{FUNCnormalize}{normalize}
+  \Fn(){
+    \FUNCnormalize{$\mat{u}$}
+  }{
+      $Z = \sum_j = u_j$\;
+      $v_j = u_j / Z$\;
+      \KwRet{$\mat{v}$, Z}
+  }
+
+  \BlankLine
+
+  $\alpha_1, Z_1 = \FuncSty{normalize}(\mat{\psi}_1 \odot \mat{\pi})$ \;
+  \For{t = 2 \KwTo T}{
+    $\alpha_t, Z_t = \FuncSty{normalize}(\mat{\psi}_t \odot (\mat{\Psi}^T \mat{\alpha}_{t-1}))$ \;
+  }
+  \KwRet{$\mat{\alpha}$, $\sum_{t} \log Z_t$}
+  \caption{Forward Algorithm}
+\end{algorithm}
+
+# Case Study
+Let's set math and computations aside for a while and focus on finance: what can we make out of a model like this?
+
+### Preamble
+Before we get moving, make sure you've downloaded all the auxiliary file to the same folder. We first check all the required packages for this notebook are avaliable.
+
+```{r}
+packages.req <- c('quantmod', 'rugarch', 'rstan', 'shinystan', 'lattice', 'gridExtra', 'gridBase', 'HH')
+packages.mis <- packages.req[!(packages.req %in% rownames(installed.packages()))]
+
+if (length(packages.mis)) {
+  stop(paste('Please, first install the following packages:', packages.mis))
+  # We could write a script to install them directly, but this may mess up other code of yours
+}
+```
+
+### Fetching the Data
+We choose $N = 5$ series from 2011-01-01 to 2016-12-31 ($T = 1502$): **^GSPC**, **F**, **GM**, **THO** and **AIR**. The data is downloaded and pre-processed using quantmod [@ryan2016quantmod].
+
+```{r message = FALSE, warning = FALSE}
+library(quantmod)
+syms <- c('^GSPC', 'F', 'GM', 'THO', 'AIR')
+
+usecache = TRUE
+cache.filename <- 'data/symsret.RDS'
+if (usecache && file.exists(cache.filename)) {
+  y_t <- readRDS(cache.filename)
+} else {
+  y_t = as.matrix(
+    do.call(cbind, lapply(syms, function(s) {
+      p <- getSymbols(s, src = "yahoo", from = "2011-01-01", to = "2016-12-31", auto.assign = FALSE)
+      r <- periodReturn(p, period = 'daily', type = 'log')
+      colnames(r) <- s
+      r * 100
+    })))
+}
+```
+
+### Inference
+The (very) **naive** implementation of the algorithm in Stan is only meant for illustration. A few good practices were neglected, convergence is not guaranteed, there is much room left for optimization and fitting *N* different independent models is probably not a reasonable choice for production sampler. The main takeaway of this presentation is the ideas behind the code but not the code itself.
+
+We'll load Stan [-@stan2016manual] and run the model for $K = 2$ states. Since the sampler may take a few minutes, I've built a very basic caching feature.
+
+```{r message = FALSE}
+library(rstan)
+rstan_options(auto_write = TRUE)  # Writes down the compiled sampler
+options(mc.cores = parallel::detectCores()) # Use all available cores
+
+K = 2 # Number of states
+bmodel = 'stan/hmmgarch.stan' # Name of the model file
+standata = list(
+  N = ncol(y_t),
+  T = nrow(y_t),
+  K = K,
+  y = t(y_t)
+)
+
+usecache = TRUE
+cache.filename <- paste0('stan/hmmgarch-cache.rds')
+if (usecache && file.exists(cache.filename)) {
+  stan.fit <- readRDS(cache.filename)
+} else {
+  stan.fit <- stan(file = bmodel,
+                   model_name = "Bayesian Hierarchical Mixture GARCH",
+                   data = standata, verbose = T,
+                   iter = 200, warmup = 100, thin = 1, chains = 4, cores = 4,
+                   control = list(adapt_delta = 0.80))
+  
+  saveRDS(stan.fit, file = cache.filename)
+}
+```
+
+We'll also fit a single regime GARCH model with rugarch [@rugarch2015]. *Sidenote: I've used rugarch considerably and it proved to be very reliable, it's a fine work of software engineering*.
+
+```{r message = FALSE}
+library(rugarch)
+SR <- lapply(1:ncol(y_t), function(n) {
+  mle.specSR <- ugarchspec(
+    variance.model = list(model = "sGARCH", garchOrder = c(1, 1),
+                          submodel = NULL, external.regressors = NULL, variance.targeting = FALSE),
+    mean.model = list(armaOrder = c(0, 0), include.mean = FALSE, archm = FALSE),
+    distribution.model = 'norm'
+  )
+  mle.fitSR  <- ugarchfit(mle.specSR, y_t[, n])
+  list(as.numeric(sigma(mle.fitSR)), uncvariance(mle.fitSR))
+})
+```
+
+### Plots
+We'll make extensive use of plots, mainly based on Lattice [@sarkar2008lattice]. For better organization, plot logic is consolidated into an [auxiliary script](R/plots.R).
+
+```{r message = FALSE}
+source('R/plots.R')
+```
+
+### Findings
+We filter the daily log returns through a single regime $GARCH(1, 1)$ model with Gaussian density.
+
+```{r, fig.width = 15, fig.height = 22, fig.keep = 'last'}
+  q <- queue[[1]]
+  tscsplot(q$getMat(), q$getMain())
+```
+
+We first observe that volatility has positive linear correlation across assets. This is pretty self-explanatory: although each asset has its own volatility level and dynamics, volatility across stocks tend to increase or decrease at the same time. Moreover, the strength of the observed relationship depends on the pairs of assets. The volatility in the log return of **F** and **GM** shows a stronger positive correlation than, say, **F** and **AIR**. Stronger correlations are expected among stocks with similar business model, industry or exposure to macroeconomic factors. Assets react differently to news. It is well expected that bad news about in the car manufacturing industry will impact **F** and **GM** in a similar way and hit **AIR** only indirectly.
+
+From the figure above it's evident that this analysis is just an approximation. First of all, data points form a funnel: the volatility spread across assets is larger when volatility increases. Second, there are many extreme values. It is very important that any analysis is checked for robustness. A first thought, logarithmic transformation would allow for multiplicative spreads, stabilize variance and partially tame extreme values at the same time. This would also map a positive bounded variable to Reals, which may or not be of interest for some purposes (for example sampling and priors).
+
+So far we've only seen that volatility is correlated across assets. You may say this was pretty obvious and you're not satisfied, so we'll keep digging. We accept the idea that market has two states and we filter the same series through a HMM Conditional Heteroskedasticity Model. Now, **F** looks as follows:
+
+```{r, fig.width = 15, fig.height = 6, fig.keep = 'last'}
+  n <- 2 # Ford
+  q <- queue[[8]]
+tscpplot(q$getMat(), q$getMain())
+```
+
+With unconditional volatilities of `r sprintf('%0.2f', colMedians(extract(stan.fit, pars = 'sigma')[[1]][, n, 1]))` and `r sprintf('%0.2f', colMedians(extract(stan.fit, pars = 'sigma')[[1]][, n, 2]))`, the states can be identified as low and high volatility days respectively. We also see that the market spends more time in the low volatility state.
+
+```{r, fig.width = 15, fig.height = 6, fig.keep = 'last'}
+  q <- queue[[9]]
+  cstscpplot(q$getMat(), q$getMain())
+```
+
+Another three interesting things to note. First, we observe that the first state is more probable when the log returns are close to zero. This is exactly what we expected when we named it *the low volatility state*. Second, the filtered probabilities are autocorrelated. This hints that some kind of memory structure may help in prediction, knowing on which state we currently are decreases uncertainty about tomorrow. Finally, the square of the volatility (the variance) estimated for each state are linearly related with intercept and slope different from zero. These features should be tested for reasonability in your own use case.
+
+We end showing that belief state across assets are correlated.
+
+```{r, fig.width = 15, fig.height = 22, fig.keep = 'last'}
+  q <- queue[[5]]
+  tscsplot(q$getMat(), q$getMain())
+```
+We noted that states and log returns are related: cross correlation in log returns may explain correlation among states. We also noted that predictability could be improved profiting from the memory structure in the states. On the whole, these feature may be of value for trading strategies or risk models.
+
+# Discussion & further research
+It's evident that states are shared among assets. Again, the strength of the relationship depends on each asset. We may even hypothesize that states follow a hierarchical structure: for example, the risk state of a global portfolio may be broken down into Country + Industry + Stock Individual. The challenge lies in finding a way to filter the emission probabilities considering that states are hierarchical using a Hierarchical Hidden Markov Model. This is clearly a perfect setting for bayesian estimation where parameter hierarchy is naturally modelled. This, I believe, is the most promising path for the analysis.
+
+# References
